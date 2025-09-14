@@ -1,4 +1,4 @@
-RAG Nutritional Chatbot
+RAG Nutritional Chatbot--- https://nutrional-chatbot.streamlit.app/
 This is a simple, command-line and Streamlit-based chatbot that provides nutritional information. It uses the principles of Retrieval-Augmented Generation (RAG) to provide accurate and up-to-date responses.
 
 Instead of relying solely on a pre-trained language model's internal knowledge, this chatbot "retrieves" real-time information from the web using the Gemini API's search grounding feature. This ensures that the answers are not only accurate but also grounded in reliable, external sources.
