@@ -2,113 +2,104 @@ import json
 import requests
 import time
 
-# Use an empty API key string. The canvas environment will handle the actual key.
-API_KEY = "AIzaSyCXwUke-IOCoc_wa2rc0UT2L-wqWE_BANM"
-API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent"
+# --- RAG Core Logic ---
 
-def generate_response(prompt, history):
+def generate_response(prompt, chat_history, api_key):
     """
-    Generates a response from the Gemini API using RAG-like behavior via Google Search grounding.
+    Generates a response using the Gemini API with RAG.
 
     Args:
-        prompt (str): The user's query.
-        history (list): A list of previous messages in the conversation.
+        prompt (str): The user's input query.
+        chat_history (list): A list of previous messages for context.
+        api_key (str): The user-provided API key.
 
     Returns:
-        str: The generated response from the chatbot, including sources.
+        str: The generated response from the chatbot.
     """
-    try:
-        # Construct the conversation history payload
-        contents = history + [{"role": "user", "parts": [{"text": prompt}]}]
-        
-        # Define the system instruction for the chatbot's persona and rules
-        system_instruction = {
-            "parts": [{
-                "text": "You are a friendly and professional nutritional expert named Nutri-Bot. Provide concise, clear, and easy-to-understand information based on reliable sources. If you are asked to provide medical advice, gently decline and recommend consulting a healthcare professional or a registered dietitian. You must cite your sources if Google Search is used."
-            }]
-        }
+    API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key={api_key}"
 
-        payload = {
-            "contents": contents,
-            "tools": [{"google_search": {}}],  # Enable Google Search grounding for RAG
-            "systemInstruction": system_instruction,
-        }
+    # The payload for the API request
+    payload = {
+        "contents": chat_history,
+        "tools": [
+            {"google_search": {}}
+        ],
+        "systemInstruction": {
+            "parts": [
+                {
+                    "text": "You are a helpful nutritional expert chatbot. Your purpose is to provide accurate and helpful nutritional advice. You will use your search tool to find the most relevant and up-to-date information, and then summarize it to answer the user's question. Always cite your sources at the end of your response, if available."
+                }
+            ]
+        },
+    }
 
-        headers = {
-            'Content-Type': 'application/json',
-        }
+    retries = 3
+    for i in range(retries):
+        try:
+            response = requests.post(API_URL, headers={"Content-Type": "application/json"}, data=json.dumps(payload))
+            response.raise_for_status()
 
-        # Make the API call with exponential backoff
-        max_retries = 3
-        retry_delay = 1
-        for i in range(max_retries):
-            response = requests.post(f"{API_URL}?key={API_KEY}", headers=headers, data=json.dumps(payload))
-            if response.status_code == 200:
-                break
-            elif response.status_code == 429: # Too many requests
-                print(f"Rate limit exceeded. Retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2
+            # Process the response and extract the text and sources
+            result = response.json()
+            candidate = result.get('candidates', [None])[0]
+            if candidate and candidate.get('content') and candidate['content'].get('parts'):
+                text = candidate['content']['parts'][0]['text']
+
+                sources = []
+                grounding_metadata = candidate.get('groundingMetadata', {})
+                if grounding_metadata and grounding_metadata.get('groundingAttributions'):
+                    sources = [
+                        source['web'] for source in grounding_metadata['groundingAttributions']
+                        if source.get('web')
+                    ]
+
+                # Append sources to the response
+                if sources:
+                    source_links = "\n\n**Sources:**\n"
+                    for idx, source in enumerate(sources):
+                        source_links += f"{idx + 1}. [{source.get('title', 'Link')}]({source.get('uri', '#')})\n"
+                    text += source_links
+                
+                return text
             else:
-                response.raise_for_status()
-        
-        response.raise_for_status() # Raise an exception for bad status codes
+                return "I'm sorry, I could not generate a response. Please try again."
 
-        result = response.json()
-        candidate = result.get('candidates', [{}])[0]
-        
-        if not candidate:
-            return "I'm sorry, I couldn't generate a response. Please try again."
+        except requests.exceptions.RequestException as e:
+            if i < retries - 1:
+                time.sleep(2 ** i)
+            else:
+                return f"An error occurred: {e}"
 
-        text = candidate.get('content', {}).get('parts', [{}])[0].get('text', '')
-        
-        # Extract grounding sources for citations
-        sources = []
-        grounding_metadata = candidate.get('groundingMetadata', {})
-        if grounding_metadata and grounding_metadata.get('groundingAttributions'):
-            for attribution in grounding_metadata['groundingAttributions']:
-                web_uri = attribution.get('web', {}).get('uri')
-                web_title = attribution.get('web', {}).get('title')
-                if web_uri and web_title:
-                    sources.append({'uri': web_uri, 'title': web_title})
+    return "An unknown error occurred after multiple retries."
 
-        # Append citations to the response
-        full_response = text
-        if sources:
-            full_response += "\n\nSources:"
-            for source in sources:
-                full_response += f"\n- [{source['title']}]({source['uri']})"
-        
-        return full_response
+if __name__ == "__main__":
+    # This block is for command-line interface (CLI) only
+    print("Welcome to Nutri-Bot! Your AI Nutritional Expert.")
+    print("Type 'quit' or 'exit' to end the conversation.")
+    print("-" * 30)
 
-    except requests.exceptions.RequestException as e:
-        return f"An error occurred: {e}"
-    except json.JSONDecodeError as e:
-        return f"Failed to parse JSON response: {e}"
-
-def main():
-    print("Hello! I'm Nutri-Bot, your personal nutritional advisor.")
-    print("I can provide information on a wide range of foods, diets, and health topics.")
-    print("Type 'exit' or 'quit' to end the conversation.")
-    print("-" * 50)
-    
     chat_history = []
     
-    while True:
-        user_input = input("You: ").strip()
-        
-        if user_input.lower() in ["exit", "quit"]:
-            print("Nutri-Bot: Goodbye! Stay healthy.")
-            break
-        
-        print("Nutri-Bot: Thinking...")
-        response = generate_response(user_input, chat_history)
-        print(f"Nutri-Bot: {response}")
-        print("-" * 50)
-        
-        # Add the user's message and the bot's response to the history for context
-        chat_history.append({"role": "user", "parts": [{"text": user_input}]})
-        chat_history.append({"role": "model", "parts": [{"text": response}]})
-        
-if __name__ == "__main__":
-    main()
+    # In a CLI context, we would need to manually ask for the API key
+    cli_api_key = input("Please enter your API Key: ")
+    if not cli_api_key:
+        print("API Key is required to run the chatbot.")
+    else:
+        while True:
+            user_input = input("You: ")
+            if user_input.lower() in ["quit", "exit"]:
+                print("Nutri-Bot: Goodbye!")
+                break
+
+            # Add user message to history for context
+            chat_history.append({"role": "user", "parts": [{"text": user_input}]})
+
+            print("Nutri-Bot: Thinking...", end="", flush=True)
+
+            # Get the response from the imported function
+            response_text = generate_response(user_input, chat_history, api_key=cli_api_key)
+            print("\r" + " " * 20, end="\r") # Clear the "Thinking..." message
+            print("Nutri-Bot:", response_text)
+
+            # Add assistant message to history for context
+            chat_history.append({"role": "model", "parts": [{"text": response_text}]})

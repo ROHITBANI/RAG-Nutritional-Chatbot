@@ -58,6 +58,16 @@ st.markdown("""
 st.title("Nutri-Bot")
 st.markdown("Your AI Nutritional Expert built with RAG")
 
+# Add a sidebar for API key input
+with st.sidebar:
+    st.header("Configuration")
+    user_api_key = st.text_input("Enter your API Key", type="password")
+    st.info("Your API key will be used for all API calls.")
+    if user_api_key:
+        st.session_state.api_key = user_api_key
+    else:
+        st.session_state.api_key = None
+
 # Initialize chat history in session state if it doesn't exist
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -73,22 +83,25 @@ for message in st.session_state.messages:
 
 # React to user input
 if prompt := st.chat_input("Ask about a food, recipe, or health topic..."):
-    # Display user message in chat message container
-    st.chat_message("user").markdown(prompt)
-    
-    # Add user message to chat history
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    with st.spinner("Thinking..."):
-        # Create a history list for the generate_response function
-        chat_history = [{"role": "user" if m['role'] == 'user' else 'model', "parts": [{"text": m['content']}]} for m in st.session_state.messages]
+    if not st.session_state.api_key:
+        st.error("Please enter your API Key in the sidebar to start a conversation.")
+    else:
+        # Display user message in chat message container
+        st.chat_message("user").markdown(prompt)
         
-        # Get response from the imported function
-        response = generate_response(prompt, chat_history)
-    
-    # Display assistant response in chat message container
-    with st.chat_message("assistant"):
-        st.markdown(response)
-    
-    # Add assistant response to chat history
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        
+        with st.spinner("Thinking..."):
+            # Create a history list for the generate_response function
+            chat_history = [{"role": "user" if m['role'] == 'user' else 'model', "parts": [{"text": m['content']}]} for m in st.session_state.messages]
+            
+            # Get response from the imported function, passing the API key
+            response = generate_response(prompt, chat_history, api_key=st.session_state.api_key)
+        
+        # Display assistant response in chat message container
+        with st.chat_message("assistant"):
+            st.markdown(response)
+        
+        # Add assistant response to chat history
+        st.session_state.messages.append({"role": "assistant", "content": response})
